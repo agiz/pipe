@@ -226,24 +226,32 @@ static inline void cond_wait(cond_t* c, mutex_t* m)
  * debug builds as the pipe can easily become a bottleneck.
  */
 struct pipe_t {
-    size_t elem_size,  // The size of each element. This is read-only and
+    size_t elem_size;  // The size of each element. This is read-only and
                        // therefore does not need to be locked to read.
-           min_cap,    // The smallest sane capacity before the buffer refuses
+    size_t min_cap;    // The smallest sane capacity before the buffer refuses
                        // to shrink because it would just end up growing again.
                        // To modify this variable, you must lock the whole pipe.
-           max_cap;    // The maximum capacity of the pipe before push requests
+    size_t max_cap;    // The maximum capacity of the pipe before push requests
                        // are blocked. This is read-only and therefore does not
                        // need to be locked to read. To modify this variable,
                        // you must lock the whole pipe.
+	volatile uint64_t o1, o2, o3, o4, o5, o6, o7; // comment out
 
-    char*  buffer,     // The internal buffer, holding the enqueued elements.
+    volatile char*  buffer;     // The internal buffer, holding the enqueued elements.
                        // to modify this variable, you must lock the whole pipe.
-        *  bufend,     // One past the end of the buffer, so that the actual
+	volatile uint64_t p1, p2, p3, p4, p5, p6, p7; // comment out
+
+    volatile char*  bufend;     // One past the end of the buffer, so that the actual
                        // elements are stored in in interval [buffer, bufend).
-        *  begin,      // Always points to the left-most element in the pipe.
+	volatile uint64_t r1, r2, r3, r4, r5, r6; // comment out
+
+    volatile char*  begin;      // Always points to the left-most element in the pipe.
                        // To modify this variable, you must lock begin_lock.
-        *  end;        // Always points past the right-most element in the pipe.
+	volatile uint64_t s1, s2, s3, s4, s5, s6; // comment out
+
+    volatile char*  end;        // Always points past the right-most element in the pipe.
                        // To modify this variable, you must lock end_lock.
+	volatile uint64_t t1, t2, t3, t4, t5, t6; // comment out
 
     // The number of producers/consumers in the pipe.
     size_t producer_refcount, // Guarded by begin_lock.
@@ -251,8 +259,9 @@ struct pipe_t {
 
     // Our lovely mutexes. To lock the pipe, call lock_pipe. Depending on what
     // you modify, you may be able to get away with only locking one of them.
-    mutex_t begin_lock,
-            end_lock;
+    mutex_t begin_lock;
+	volatile uint64_t u1, u2, u3, u4, u5, u6; // comment out
+    mutex_t end_lock;
 
     cond_t just_pushed, // Signaled immediately after a push.
            just_popped; // Signaled immediately after a pop.
@@ -265,10 +274,17 @@ struct pipe_t {
 // up-to-date (usually only one of begin or end). By passing this around, we
 // avoid constantly wrecking our cache by accessing the real pipe_t.
 typedef struct {
-    char* buffer,
-        * bufend,
-        * begin,
-        * end;
+	volatile uint64_t o1, o2, o3, o4, o5, o6, o7; // comment out
+    volatile char* buffer;
+	volatile uint64_t p1, p2, p3, p4, p5, p6, p7; // comment out
+
+    volatile char* bufend;
+	volatile uint64_t r1, r2, r3, r4, r5, r6;
+    
+    volatile char* begin;
+	volatile uint64_t s1, s2, s3, s4, s5, s6; // comment out
+
+    volatile char* end;
 } snapshot_t;
 
 static inline snapshot_t make_snapshot(pipe_t* p)
@@ -312,9 +328,9 @@ static inline size_t bytes_in_use(snapshot_t s)
             : (s.end - s.begin);
 }
 
-static inline char* wrap_ptr_if_necessary(char* buffer,
-                                          char* p,
-                                          char* bufend)
+static inline char* wrap_ptr_if_necessary(volatile char* buffer,
+                                          volatile char* p,
+                                          volatile char* bufend)
 {
     return p == bufend ? buffer : p;
 }
@@ -450,7 +466,8 @@ pipe_t* pipe_new(size_t elem_size, size_t limit)
     pipe_t* p = malloc(sizeof *p);
 
     size_t cap = DEFAULT_MINCAP * elem_size;
-    char*  buf = malloc(elem_size * cap);
+    char*  buf __attribute__ ((aligned(16)));
+    buf = malloc(elem_size * cap);
 
     // Change the limit from being in "elements" to being in "bytes".
     limit *= elem_size;
@@ -638,7 +655,8 @@ static snapshot_t resize_buffer(pipe_t* p, size_t new_size)
     if(new_size < min_cap)
         return make_snapshot(p);
 
-    char* new_buf = malloc(new_size);
+    char* new_buf __attribute__ ((aligned(16)));
+    new_buf = malloc(new_size);
     p->end = copy_pipe_into_new_buf(make_snapshot(p), new_buf);
 
     p->begin  =
